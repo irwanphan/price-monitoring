@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # FastAPI Application
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/price_monitor
+      - REDIS_URL=redis://redis:6379/0
+      - ZYTE_API_KEY=${ZYTE_API_KEY:-}
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=price_monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Redis (for Celery)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Celery Worker (for scraping tasks)
+  celery_worker:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/price_monitor
+      - REDIS_URL=redis://redis:6379/0
+      - ZYTE_API_KEY=${ZYTE_API_KEY:-}
+    depends_on:
+      - db
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+
+  # Celery Beat (for scheduled tasks)
+  celery_beat:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/price_monitor
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    volumes:
+      - .:/app
+
+volumes:
+  postgres_data:

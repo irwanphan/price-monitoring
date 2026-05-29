@@ -21,6 +21,51 @@
   [x-cloak] { display: none !important; }
   .toast { animation: slideIn .3s ease; }
   @keyframes slideIn { from { transform: translateX(100%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+
+  /* ===== Form controls: force readable text on white card background =====
+     Body uses text-white (dark sidebar theme). Tailwind CDN injects its
+     preflight (color: inherit on inputs) at runtime AFTER this <style> block,
+     so without !important the inputs/selects/textareas re-inherit white text
+     and become invisible on white cards. We centralise the override here so
+     individual fields don't each need `text-gray-900`. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    color: #111827 !important;               /* gray-900 */
+    background-color: #ffffff !important;
+    caret-color: #2563eb;                    /* blue-600 caret */
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af !important;               /* gray-400 */
+    opacity: 1;
+  }
+  /* "Pilih ..." placeholder option looks muted; real options stay dark. */
+  select option[value=""] {
+    color: #9ca3af !important;
+  }
+  select option {
+    color: #111827 !important;
+    background-color: #ffffff !important;
+  }
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    background-color: #f3f4f6 !important;    /* gray-100 */
+    color: #6b7280 !important;               /* gray-500 */
+    cursor: not-allowed;
+  }
+  /* Autofill (Chrome/Edge/Safari) — browsers force their own colors here. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: #111827 !important;
+    -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+    box-shadow: 0 0 0 1000px #ffffff inset !important;
+    caret-color: #2563eb;
+  }
 </style>
 </head>
 <body class="bg-slate-950 text-white min-h-screen flex" x-data="app()" x-init="init()">

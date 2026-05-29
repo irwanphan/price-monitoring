@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Text, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Text, Index, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime
 
@@ -22,6 +22,7 @@ class Product(Base):
 
     # Relationships
     price_snapshots = relationship("PriceSnapshot", back_populates="product")
+    monitored_urls = relationship("MonitoredURL", back_populates="product")
     competitor_mappings_as_target = relationship(
         "CompetitorMapping",
         foreign_keys="CompetitorMapping.competitor_product_id",
@@ -46,6 +47,7 @@ class Store(Base):
 
     # Relationships
     price_snapshots = relationship("PriceSnapshot", back_populates="store")
+    monitored_urls = relationship("MonitoredURL", back_populates="store")
 
 
 class CompetitorMapping(Base):
@@ -93,3 +95,28 @@ class PriceSnapshot(Base):
     # Relationships
     product = relationship("Product", back_populates="price_snapshots")
     store = relationship("Store", back_populates="price_snapshots")
+
+
+class MonitoredURL(Base):
+    """
+    Stores product URLs to be scraped automatically.
+    This is the core config table: user registers which URLs to monitor
+    for which product on which store, so weekly scraping knows what to fetch.
+    """
+    __tablename__ = "monitored_urls"
+    __table_args__ = (
+        UniqueConstraint("product_id", "store_id", "url", name="uq_product_store_url"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    url = Column(Text, nullable=False)  # Full marketplace product URL
+    label = Column(String(255), nullable=True)  # Optional human label e.g. "Tokopedia Adata S70 1TB"
+    is_active = Column(Boolean, default=True)
+    last_scraped_at = Column(DateTime, nullable=True)  # Last time this URL was scraped
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    product = relationship("Product", back_populates="monitored_urls")
+    store = relationship("Store", back_populates="monitored_urls")

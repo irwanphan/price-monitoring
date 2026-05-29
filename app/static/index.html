@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Adata Price Monitor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .sidebar-link { @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors; }
+  .active-link { background: #2563eb; color: white; }
+  .inactive-link { color: #94a3b8; }
+  .inactive-link:hover { background: #1e293b; color: white; }
+  .card { @apply bg-white rounded-xl border border-gray-200 p-5; }
+  .badge-marketplace { @apply text-xs font-semibold px-2 py-0.5 rounded-full; }
+  .badge-tokopedia { background:#00AA5B22; color:#00AA5B; }
+  .badge-shopee { background:#EE472022; color:#EE4720; }
+  .badge-blibli { background:#0095DA22; color:#0095DA; }
+  .badge-lazada { background:#0F146D22; color:#0F146D; }
+  .badge-tiktok { background:#00000022; color:#000000; }
+  [x-cloak] { display: none !important; }
+  .toast { animation: slideIn .3s ease; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+</style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen flex" x-data="app()" x-init="init()">
+
+<!-- SIDEBAR -->
+<aside class="w-60 min-h-screen bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0">
+  <div class="px-5 py-5 border-b border-slate-800">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm font-bold">A</div>
+      <div>
+        <div class="font-semibold text-sm">Adata Monitor</div>
+        <div class="text-xs text-slate-500">Price Tracking</div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="p-3 flex-1 flex flex-col gap-1">
+    <template x-for="item in nav" :key="item.id">
+      <button @click="page = item.id"
+        :class="page === item.id ? 'active-link' : 'inactive-link'"
+        class="sidebar-link w-full text-left">
+        <span x-text="item.icon" class="text-base"></span>
+        <span x-text="item.label"></span>
+      </button>
+    </template>
+  </nav>
+
+  <div class="p-4 border-t border-slate-800">
+    <div class="text-xs text-slate-500">API: <span class="text-slate-400" x-text="apiBase"></span></div>
+    <div class="mt-1 flex items-center gap-1.5">
+      <div class="w-2 h-2 rounded-full" :class="apiOnline ? 'bg-green-400' : 'bg-red-400'"></div>
+      <span class="text-xs text-slate-400" x-text="apiOnline ? 'Connected' : 'Disconnected'"></span>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="flex-1 flex flex-col overflow-auto">
+
+  <!-- TOPBAR -->
+  <header class="bg-slate-900 border-b border-slate-800 px-6 py-3.5 flex items-center justify-between sticky top-0 z-10">
+    <h1 class="font-semibold text-sm" x-text="nav.find(n=>n.id===page)?.label || ''"></h1>
+    <div class="flex items-center gap-3">
+      <button @click="triggerScrape()" :disabled="scraping"
+        class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors">
+        <span x-show="!scraping">🚀 Scrape Sekarang</span>
+        <span x-show="scraping" x-cloak>⏳ Scraping...</span>
+      </button>
+      <a :href="apiBase + '/api/v1/reports/price-comparison/excel'" target="_blank"
+        class="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors">
+        📊 Download Laporan
+      </a>
+    </div>
+  </header>
+
+  <div class="p-6 flex-1">
+
+    <!-- ===== OVERVIEW ===== -->
+    <div x-show="page === 'overview'">
+      <!-- Stats -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <template x-for="stat in stats" :key="stat.label">
+          <div class="card">
+            <div class="text-2xl font-bold text-blue-400" x-text="stat.value"></div>
+            <div class="text-sm text-gray-500 mt-1" x-text="stat.label"></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Latest Snapshots -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-gray-900">Harga Terbaru</h2>
+          <button @click="loadLatestSnapshots()" class="text-xs text-blue-600 hover:underline">Refresh</button>
+        </div>
+        <div x-show="latestSnapshots.length === 0" class="text-center py-8 text-gray-400 text-sm">
+          Belum ada data. Tambah produk, toko, dan URL monitor dulu.
+        </div>
+        <div class="overflow-x-auto" x-show="latestSnapshots.length > 0">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-100">
+                <th class="pb-2 font-medium">Produk</th>
+                <th class="pb-2 font-medium">Marketplace</th>
+                <th class="pb-2 font-medium">Toko</th>
+                <th class="pb-2 font-medium text-right">Harga</th>
+                <th class="pb-2 font-medium text-right">Diskon</th>
+                <th class="pb-2 font-medium">Stok</th>
+                <th class="pb-2 font-medium">Tanggal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="s in latestSnapshots" :key="s.id">
+                <tr class="border-b border-gray-50 hover:bg-gray-50" :class="!s.is_valid ? 'bg-red-50' : ''">
+                  <td class="py-2 font-medium text-gray-900 max-w-xs truncate" x-text="s.product_name || '-'"></td>
+                  <td class="py-2">
+                    <span class="badge-marketplace" :class="'badge-'+s.marketplace" x-text="s.marketplace"></span>
+                  </td>
+                  <td class="py-2 text-gray-600" x-text="s.store_name || '-'"></td>
+                  <td class="py-2 text-right font-semibold text-gray-900" x-text="'Rp ' + s.price.toLocaleString('id-ID')"></td>
+                  <td class="py-2 text-right text-orange-600" x-text="s.discount_percentage ? s.discount_percentage.toFixed(0)+'%' : '-'"></td>
+                  <td class="py-2">
+                    <span x-text="s.stock_status || '-'"
+                      :class="s.stock_status === 'in_stock' ? 'text-green-600' : 'text-red-500'" class="text-xs font-medium"></span>
+                  </td>
+                  <td class="py-2 text-gray-400 text-xs" x-text="formatDate(s.snapshot_date)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PRODUK ===== -->
+    <div x-show="page === 'products'" x-cloak>
+      <div class="flex gap-6">
+        <!-- Form -->
+        <div class="w-80 flex-shrink-0">
+          <div class="card">
+            <h2 class="font-semibold text-gray-900 mb-4">Tambah Produk</h2>
+            <form @submit.prevent="addProduct()" class="flex flex-col gap-3">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Brand</label>
+                <select x-model="productForm.brand" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih brand...</option>
+                  <option>Adata</option>
+                  <option>XPG</option>
+                  <option>Team</option>
+                  <option>Kingston</option>
+                  <option>Samsung</option>
+                  <option>WD</option>
+                  <option>Corsair</option>
+                  <option>G.Skill</option>
+                  <option>Lainnya</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Nama Produk</label>
+                <input x-model="productForm.name" type="text" placeholder="XPG Gammix S70 Blade 1TB" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">SKU</label>
+                <input x-model="productForm.sku" type="text" placeholder="AGAMMIXS70B-1T-CS" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Kategori</label>
+                <select x-model="productForm.category" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih kategori...</option>
+                  <option>SSD</option>
+                  <option>RAM</option>
+                  <option>PSU</option>
+                  <option>Flashdisk</option>
+                  <option>Memory Card</option>
+                  <option>External SSD</option>
+                  <option>HDD</option>
+                </select>
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                + Tambah Produk
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="flex-1 card overflow-x-auto">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold text-gray-900">Daftar Produk (<span x-text="products.length"></span>)</h2>
+            <div class="flex gap-2">
+              <select x-model="productFilter.brand" @change="filterProducts()" class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+                <option value="">Semua brand</option>
+                <option>Adata</option><option>XPG</option><option>Team</option><option>Kingston</option><option>Samsung</option>
+              </select>
+              <select x-model="productFilter.category" @change="filterProducts()" class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+                <option value="">Semua kategori</option>
+                <option>SSD</option><option>RAM</option><option>PSU</option>
+              </select>
+            </div>
+          </div>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-100">
+                <th class="pb-2 font-medium">Brand</th>
+                <th class="pb-2 font-medium">Nama</th>
+                <th class="pb-2 font-medium">SKU</th>
+                <th class="pb-2 font-medium">Kategori</th>
+                <th class="pb-2 font-medium">Status</th>
+                <th class="pb-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="p in products" :key="p.id">
+                <tr class="border-b border-gray-50 hover:bg-gray-50">
+                  <td class="py-2 font-medium" x-text="p.brand"></td>
+                  <td class="py-2 text-gray-700 max-w-xs truncate" x-text="p.name"></td>
+                  <td class="py-2 text-gray-500 font-mono text-xs" x-text="p.sku"></td>
+                  <td class="py-2 text-gray-500" x-text="p.category || '-'"></td>
+                  <td class="py-2">
+                    <span x-text="p.is_active ? 'Aktif' : 'Nonaktif'"
+                      :class="p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
+                      class="text-xs font-medium px-2 py-0.5 rounded-full"></span>
+                  </td>
+                  <td class="py-2 text-right">
+                    <button @click="deleteProduct(p.id)" class="text-red-400 hover:text-red-600 text-xs">Hapus</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="products.length === 0">
+                <td colspan="6" class="text-center py-6 text-gray-400">Belum ada produk</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== TOKO ===== -->
+    <div x-show="page === 'stores'" x-cloak>
+      <div class="flex gap-6">
+        <div class="w-80 flex-shrink-0">
+          <div class="card">
+            <h2 class="font-semibold text-gray-900 mb-4">Tambah Toko</h2>
+            <form @submit.prevent="addStore()" class="flex flex-col gap-3">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Marketplace</label>
+                <select x-model="storeForm.marketplace" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih marketplace...</option>
+                  <option value="tokopedia">Tokopedia</option>
+                  <option value="shopee">Shopee</option>
+                  <option value="blibli">Blibli</option>
+                  <option value="lazada">Lazada</option>
+                  <option value="tiktok">TikTok Shop</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Store ID / Username Toko</label>
+                <input x-model="storeForm.store_id" type="text" placeholder="adata-xpg-id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <p class="text-xs text-gray-400 mt-1">Contoh Tokopedia: bagian URL setelah tokopedia.com/</p>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Nama Toko</label>
+                <input x-model="storeForm.store_name" type="text" placeholder="Adata XPG Official Store" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                + Tambah Toko
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="flex-1 card">
+          <h2 class="font-semibold text-gray-900 mb-4">Daftar Toko (<span x-text="stores.length"></span>)</h2>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-100">
+                <th class="pb-2 font-medium">Marketplace</th>
+                <th class="pb-2 font-medium">Store ID</th>
+                <th class="pb-2 font-medium">Nama Toko</th>
+                <th class="pb-2 font-medium">Status</th>
+                <th class="pb-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="s in stores" :key="s.id">
+                <tr class="border-b border-gray-50 hover:bg-gray-50">
+                  <td class="py-2">
+                    <span class="badge-marketplace" :class="'badge-'+s.marketplace" x-text="s.marketplace"></span>
+                  </td>
+                  <td class="py-2 font-mono text-xs text-gray-500" x-text="s.store_id"></td>
+                  <td class="py-2 font-medium text-gray-700" x-text="s.store_name"></td>
+                  <td class="py-2">
+                    <span :class="s.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
+                      class="text-xs font-medium px-2 py-0.5 rounded-full" x-text="s.is_active ? 'Aktif' : 'Nonaktif'"></span>
+                  </td>
+                  <td class="py-2 text-right">
+                    <button @click="deleteStore(s.id)" class="text-red-400 hover:text-red-600 text-xs">Hapus</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="stores.length === 0">
+                <td colspan="5" class="text-center py-6 text-gray-400">Belum ada toko</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== URL MONITOR ===== -->
+    <div x-show="page === 'urls'" x-cloak>
+      <div class="flex gap-6">
+        <div class="w-96 flex-shrink-0">
+          <div class="card">
+            <h2 class="font-semibold text-gray-900 mb-1">Daftarkan URL Monitor</h2>
+            <p class="text-xs text-gray-500 mb-4">URL produk yang akan di-scrape otomatis setiap minggu.</p>
+            <form @submit.prevent="addMonitoredURL()" class="flex flex-col gap-3">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Produk</label>
+                <select x-model="urlForm.product_id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih produk...</option>
+                  <template x-for="p in allProducts" :key="p.id">
+                    <option :value="p.id" x-text="p.brand + ' — ' + p.name + ' (' + p.sku + ')'"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Toko</label>
+                <select x-model="urlForm.store_id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih toko...</option>
+                  <template x-for="s in allStores" :key="s.id">
+                    <option :value="s.id" x-text="s.store_name + ' (' + s.marketplace + ')'"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">URL Produk</label>
+                <input x-model="urlForm.url" type="url" placeholder="https://www.tokopedia.com/adata-xpg-id/..." class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Label (opsional)</label>
+                <input x-model="urlForm.label" type="text" placeholder="Adata S70 Blade 1TB - Tokopedia" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                + Tambah URL Monitor
+              </button>
+            </form>
+          </div>
+
+          <!-- Quick test -->
+          <div class="card mt-4">
+            <h3 class="font-semibold text-gray-900 mb-2 text-sm">Test Scrape URL</h3>
+            <p class="text-xs text-gray-500 mb-3">Test scrape satu URL sebelum didaftarkan.</p>
+            <input x-model="testUrl" type="url" placeholder="https://www.tokopedia.com/..." class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button @click="testScrapeURL()" :disabled="testingScrape"
+              class="w-full bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 rounded-lg disabled:opacity-50 transition-colors">
+              <span x-show="!testingScrape">🔍 Test Scrape</span>
+              <span x-show="testingScrape" x-cloak>⏳ Scraping...</span>
+            </button>
+            <div x-show="testResult" x-cloak class="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <div class="text-xs text-gray-700 font-medium" x-text="testResult?.product_name"></div>
+              <div class="text-sm font-bold text-green-700 mt-1" x-text="testResult?.price ? 'Rp ' + testResult.price.toLocaleString('id-ID') : '-'"></div>
+              <div x-show="testResult?.discount_percentage" class="text-xs text-orange-600" x-text="'Diskon: ' + testResult?.discount_percentage?.toFixed(0) + '%'"></div>
+              <div class="text-xs text-gray-500 mt-1" x-text="'Stok: ' + (testResult?.stock_status || '-')"></div>
+            </div>
+            <div x-show="testError" x-cloak class="mt-3 p-3 bg-red-50 rounded-lg border border-red-200 text-xs text-red-600" x-text="testError"></div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="flex-1 card overflow-x-auto">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold text-gray-900">URL Monitor (<span x-text="monitoredURLs.length"></span>)</h2>
+            <button @click="loadMonitoredURLs()" class="text-xs text-blue-600 hover:underline">Refresh</button>
+          </div>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-100">
+                <th class="pb-2 font-medium">Produk</th>
+                <th class="pb-2 font-medium">Marketplace</th>
+                <th class="pb-2 font-medium">Toko</th>
+                <th class="pb-2 font-medium">Label</th>
+                <th class="pb-2 font-medium">Terakhir Scrape</th>
+                <th class="pb-2 font-medium">Status</th>
+                <th class="pb-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="u in monitoredURLs" :key="u.id">
+                <tr class="border-b border-gray-50 hover:bg-gray-50">
+                  <td class="py-2 text-gray-700 max-w-xs">
+                    <div class="font-medium text-xs" x-text="u.product_name || '-'"></div>
+                    <div class="text-gray-400 text-xs font-mono" x-text="u.product_sku || ''"></div>
+                  </td>
+                  <td class="py-2">
+                    <span class="badge-marketplace" :class="'badge-'+(u.marketplace||'')" x-text="u.marketplace || '-'"></span>
+                  </td>
+                  <td class="py-2 text-gray-600 text-xs" x-text="u.store_name || '-'"></td>
+                  <td class="py-2 text-gray-600 text-xs max-w-xs truncate">
+                    <a :href="u.url" target="_blank" class="hover:text-blue-600 hover:underline" x-text="u.label || u.url"></a>
+                  </td>
+                  <td class="py-2 text-gray-400 text-xs" x-text="u.last_scraped_at ? formatDate(u.last_scraped_at) : 'Belum pernah'"></td>
+                  <td class="py-2">
+                    <span :class="u.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
+                      class="text-xs font-medium px-2 py-0.5 rounded-full" x-text="u.is_active ? 'Aktif' : 'Nonaktif'"></span>
+                  </td>
+                  <td class="py-2 text-right flex gap-2 justify-end">
+                    <button @click="toggleURL(u)" class="text-xs text-blue-400 hover:text-blue-600" x-text="u.is_active ? 'Pause' : 'Aktifkan'"></button>
+                    <button @click="deleteURL(u.id)" class="text-xs text-red-400 hover:text-red-600">Hapus</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="monitoredURLs.length === 0">
+                <td colspan="7" class="text-center py-8 text-gray-400">
+                  Belum ada URL yang dimonitor.<br>
+                  <span class="text-xs">Tambah URL produk Tokopedia di form sebelah kiri.</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== KOMPETITOR ===== -->
+    <div x-show="page === 'competitors'" x-cloak>
+      <div class="flex gap-6">
+        <div class="w-80 flex-shrink-0">
+          <div class="card">
+            <h2 class="font-semibold text-gray-900 mb-1">Mapping Kompetitor</h2>
+            <p class="text-xs text-gray-500 mb-4">Hubungkan produk Adata dengan produk kompetitor yang setara.</p>
+            <form @submit.prevent="addMapping()" class="flex flex-col gap-3">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Produk Adata (Referensi)</label>
+                <select x-model="mappingForm.reference_product_sku" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih produk Adata...</option>
+                  <template x-for="p in allProducts.filter(p => p.brand === 'Adata' || p.brand === 'XPG')" :key="p.id">
+                    <option :value="p.sku" x-text="p.brand + ' — ' + p.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Produk Kompetitor</label>
+                <select x-model="mappingForm.competitor_product_sku" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Pilih kompetitor...</option>
+                  <template x-for="p in allProducts.filter(p => p.brand !== 'Adata' && p.brand !== 'XPG')" :key="p.id">
+                    <option :value="p.sku" x-text="p.brand + ' — ' + p.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Catatan</label>
+                <input x-model="mappingForm.notes" type="text" placeholder="Direct competitor - 1TB NVMe Gen4" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                + Tambah Mapping
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="flex-1 card">
+          <h2 class="font-semibold text-gray-900 mb-4">Daftar Mapping (<span x-text="mappings.length"></span>)</h2>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-100">
+                <th class="pb-2 font-medium">Produk Adata</th>
+                <th class="pb-2 font-medium text-center">vs</th>
+                <th class="pb-2 font-medium">Kompetitor</th>
+                <th class="pb-2 font-medium">Catatan</th>
+                <th class="pb-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="m in mappings" :key="m.id">
+                <tr class="border-b border-gray-50 hover:bg-gray-50">
+                  <td class="py-2 font-medium text-blue-700" x-text="m.reference_product?.name || m.reference_product_id"></td>
+                  <td class="py-2 text-center text-gray-300">↔</td>
+                  <td class="py-2 font-medium text-orange-700" x-text="m.competitor_product?.name || m.competitor_product_id"></td>
+                  <td class="py-2 text-gray-500 text-xs" x-text="m.notes || '-'"></td>
+                  <td class="py-2 text-right">
+                    <button @click="deleteMapping(m.id)" class="text-red-400 hover:text-red-600 text-xs">Hapus</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="mappings.length === 0">
+                <td colspan="5" class="text-center py-6 text-gray-400">Belum ada mapping kompetitor</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== LAPORAN ===== -->
+    <div x-show="page === 'reports'" x-cloak>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Download options -->
+        <div class="card">
+          <h2 class="font-semibold text-gray-900 mb-4">Download Laporan Excel</h2>
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Brand (opsional)</label>
+              <select x-model="reportFilter.brand" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Semua brand</option>
+                <option>Adata</option><option>XPG</option><option>Team</option><option>Kingston</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Periode</label>
+              <select x-model="reportFilter.days" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="7">7 hari terakhir</option>
+                <option value="14">14 hari terakhir</option>
+                <option value="30">30 hari terakhir</option>
+                <option value="90">90 hari terakhir</option>
+              </select>
+            </div>
+            <a :href="getReportURL()" target="_blank"
+              class="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors">
+              📊 Download Excel
+            </a>
+          </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="lg:col-span-2 card">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold text-gray-900">Ringkasan Pasar</h2>
+            <button @click="loadReportSummary()" class="text-xs text-blue-600 hover:underline">Refresh</button>
+          </div>
+          <div x-show="reportSummary.length === 0" class="text-center py-8 text-gray-400 text-sm">
+            Belum ada data harga. Lakukan scraping terlebih dahulu.
+          </div>
+          <div class="overflow-x-auto" x-show="reportSummary.length > 0">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-gray-500 border-b border-gray-100">
+                  <th class="pb-2 font-medium">Produk</th>
+                  <th class="pb-2 font-medium text-right">Min</th>
+                  <th class="pb-2 font-medium text-right">Avg</th>
+                  <th class="pb-2 font-medium text-right">Max</th>
+                  <th class="pb-2 font-medium"># Listing</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in reportSummary" :key="r.product_id">
+                  <tr class="border-b border-gray-50 hover:bg-gray-50">
+                    <td class="py-2">
+                      <div class="font-medium text-gray-900 text-xs" x-text="r.product_name"></div>
+                      <div class="text-gray-400 text-xs" x-text="r.brand"></div>
+                    </td>
+                    <td class="py-2 text-right text-green-700 font-medium" x-text="r.min_price ? 'Rp ' + Math.round(r.min_price).toLocaleString('id-ID') : '-'"></td>
+                    <td class="py-2 text-right text-gray-700" x-text="r.avg_price ? 'Rp ' + Math.round(r.avg_price).toLocaleString('id-ID') : '-'"></td>
+                    <td class="py-2 text-right text-red-600" x-text="r.max_price ? 'Rp ' + Math.round(r.max_price).toLocaleString('id-ID') : '-'"></td>
+                    <td class="py-2 text-gray-500" x-text="r.count || 0"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /p-6 -->
+</main>
+
+<!-- TOAST -->
+<div class="fixed bottom-5 right-5 flex flex-col gap-2 z-50">
+  <template x-for="(t, i) in toasts" :key="t.id">
+    <div class="toast flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium min-w-60 max-w-sm"
+      :class="t.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'">
+      <span x-text="t.type === 'success' ? '✓' : '✗'" class="font-bold text-base"></span>
+      <span x-text="t.message" class="flex-1"></span>
+    </div>
+  </template>
+</div>
+
+<script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+<script>
+function app() {
+  return {
+    apiBase: window.location.origin,
+    apiOnline: false,
+    page: 'overview',
+    scraping: false,
+    toasts: [],
+    nav: [
+      { id: 'overview', label: 'Overview', icon: '📊' },
+      { id: 'products', label: 'Produk', icon: '📦' },
+      { id: 'stores', label: 'Toko', icon: '🏪' },
+      { id: 'urls', label: 'URL Monitor', icon: '🔗' },
+      { id: 'competitors', label: 'Kompetitor', icon: '⚔️' },
+      { id: 'reports', label: 'Laporan', icon: '📋' },
+    ],
+
+    // Data
+    products: [], allProducts: [],
+    stores: [], allStores: [],
+    monitoredURLs: [],
+    mappings: [],
+    latestSnapshots: [],
+    reportSummary: [],
+    stats: [
+      { label: 'Total Produk', value: '-' },
+      { label: 'Total Toko', value: '-' },
+      { label: 'URL Dimonitor', value: '-' },
+      { label: 'Data Harga', value: '-' },
+    ],
+
+    // Forms
+    productForm: { brand: '', name: '', sku: '', category: '' },
+    productFilter: { brand: '', category: '' },
+    storeForm: { marketplace: '', store_id: '', store_name: '' },
+    urlForm: { product_id: '', store_id: '', url: '', label: '' },
+    mappingForm: { reference_product_sku: '', competitor_product_sku: '', notes: '' },
+    reportFilter: { brand: '', days: '7' },
+    testUrl: '', testResult: null, testError: null, testingScrape: false,
+
+    async init() {
+      await this.checkHealth();
+      await Promise.all([
+        this.loadProducts(),
+        this.loadStores(),
+        this.loadMonitoredURLs(),
+        this.loadLatestSnapshots(),
+      ]);
+      await this.loadStats();
+    },
+
+    async api(method, path, body = null) {
+      const opts = {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(this.apiBase + path, opts);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return res.status === 204 ? null : res.json();
+    },
+
+    async checkHealth() {
+      try {
+        const r = await fetch(this.apiBase + '/health');
+        this.apiOnline = r.ok;
+      } catch { this.apiOnline = false; }
+    },
+
+    toast(message, type = 'success') {
+      const id = Date.now();
+      this.toasts.push({ id, message, type });
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 3500);
+    },
+
+    formatDate(dt) {
+      if (!dt) return '-';
+      return new Date(dt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+    },
+
+    // --- Products ---
+    async loadProducts() {
+      try {
+        const brand = this.productFilter.brand || undefined;
+        const cat = this.productFilter.category || undefined;
+        let path = '/api/v1/products/?is_active=true&limit=200';
+        if (brand) path += `&brand=${brand}`;
+        if (cat) path += `&category=${cat}`;
+        this.products = await this.api('GET', path);
+        this.allProducts = await this.api('GET', '/api/v1/products/?limit=500');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async filterProducts() { await this.loadProducts(); },
+    async addProduct() {
+      try {
+        await this.api('POST', '/api/v1/products/', this.productForm);
+        this.productForm = { brand: '', name: '', sku: '', category: '' };
+        await this.loadProducts();
+        this.toast('Produk berhasil ditambahkan');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async deleteProduct(id) {
+      if (!confirm('Hapus produk ini?')) return;
+      try {
+        await this.api('DELETE', `/api/v1/products/${id}`);
+        await this.loadProducts();
+        this.toast('Produk dihapus');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    // --- Stores ---
+    async loadStores() {
+      try {
+        this.stores = await this.api('GET', '/api/v1/stores/?limit=200');
+        this.allStores = this.stores;
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async addStore() {
+      try {
+        await this.api('POST', '/api/v1/stores/', this.storeForm);
+        this.storeForm = { marketplace: '', store_id: '', store_name: '' };
+        await this.loadStores();
+        this.toast('Toko berhasil ditambahkan');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async deleteStore(id) {
+      if (!confirm('Hapus toko ini?')) return;
+      try {
+        await this.api('DELETE', `/api/v1/stores/${id}`);
+        await this.loadStores();
+        this.toast('Toko dihapus');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    // --- Monitored URLs ---
+    async loadMonitoredURLs() {
+      try {
+        this.monitoredURLs = await this.api('GET', '/api/v1/monitored-urls/?limit=200');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async addMonitoredURL() {
+      try {
+        const payload = {
+          product_id: parseInt(this.urlForm.product_id),
+          store_id: parseInt(this.urlForm.store_id),
+          url: this.urlForm.url,
+          label: this.urlForm.label || null,
+        };
+        await this.api('POST', '/api/v1/monitored-urls/', payload);
+        this.urlForm = { product_id: '', store_id: '', url: '', label: '' };
+        await this.loadMonitoredURLs();
+        this.toast('URL berhasil didaftarkan untuk monitoring');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async toggleURL(u) {
+      try {
+        await this.api('PUT', `/api/v1/monitored-urls/${u.id}`, { is_active: !u.is_active });
+        await this.loadMonitoredURLs();
+        this.toast(u.is_active ? 'URL dipause' : 'URL diaktifkan');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async deleteURL(id) {
+      if (!confirm('Hapus URL monitor ini?')) return;
+      try {
+        await this.api('DELETE', `/api/v1/monitored-urls/${id}`);
+        await this.loadMonitoredURLs();
+        this.toast('URL dihapus');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async testScrapeURL() {
+      if (!this.testUrl) return;
+      this.testingScrape = true;
+      this.testResult = null;
+      this.testError = null;
+      try {
+        const res = await fetch(this.apiBase + `/api/v1/scrape/test?url=${encodeURIComponent(this.testUrl)}`);
+        const data = await res.json();
+        if (data.error) this.testError = data.error;
+        else this.testResult = data;
+      } catch (e) { this.testError = e.message; }
+      this.testingScrape = false;
+    },
+
+    // --- Competitor Mappings ---
+    async loadMappings() {
+      try {
+        this.mappings = await this.api('GET', '/api/v1/competitor-mappings/?limit=200');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async addMapping() {
+      try {
+        await this.api('POST', '/api/v1/competitor-mappings/', this.mappingForm);
+        this.mappingForm = { reference_product_sku: '', competitor_product_sku: '', notes: '' };
+        await this.loadMappings();
+        this.toast('Mapping kompetitor ditambahkan');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+    async deleteMapping(id) {
+      if (!confirm('Hapus mapping ini?')) return;
+      try {
+        await this.api('DELETE', `/api/v1/competitor-mappings/${id}`);
+        await this.loadMappings();
+        this.toast('Mapping dihapus');
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    // --- Overview ---
+    async loadLatestSnapshots() {
+      // Load recent snapshots from price history of all products
+      try {
+        const prods = await this.api('GET', '/api/v1/products/?limit=50&is_active=true');
+        const snapshots = [];
+        for (const p of prods.slice(0, 10)) {
+          const latest = await this.api('GET', `/api/v1/prices/product/${p.id}/latest`).catch(() => []);
+          for (const s of latest) {
+            s.product_name = p.name;
+            s.brand = p.brand;
+            snapshots.push(s);
+          }
+        }
+        this.latestSnapshots = snapshots.sort((a,b) => new Date(b.snapshot_date) - new Date(a.snapshot_date)).slice(0, 30);
+      } catch (e) { /* silent */ }
+    },
+
+    async loadStats() {
+      const prods = this.allProducts.length || 0;
+      const stores = this.stores.length || 0;
+      const urls = this.monitoredURLs.length || 0;
+      const snaps = this.latestSnapshots.length || 0;
+      this.stats = [
+        { label: 'Total Produk', value: prods },
+        { label: 'Total Toko', value: stores },
+        { label: 'URL Dimonitor', value: urls },
+        { label: 'Snapshot Terbaru', value: snaps },
+      ];
+    },
+
+    async loadReportSummary() {
+      try {
+        const days = this.reportFilter.days || 7;
+        let path = `/api/v1/reports/price-comparison/summary?days=${days}`;
+        if (this.reportFilter.brand) path += `&brand=${this.reportFilter.brand}`;
+        this.reportSummary = await this.api('GET', path);
+      } catch (e) { this.toast(e.message, 'error'); }
+    },
+
+    getReportURL() {
+      let url = `${this.apiBase}/api/v1/reports/price-comparison/excel?days=${this.reportFilter.days}`;
+      if (this.reportFilter.brand) url += `&brand=${this.reportFilter.brand}`;
+      return url;
+    },
+
+    // --- Scraping ---
+    async triggerScrape() {
+      if (!this.monitoredURLs.length) {
+        this.toast('Tidak ada URL yang dimonitor. Daftarkan URL dulu.', 'error');
+        return;
+      }
+      this.scraping = true;
+      try {
+        const urls = this.monitoredURLs.filter(u => u.is_active).map(u => ({ url: u.url }));
+        const result = await this.api('POST', '/api/v1/scrape/', { urls, marketplace: 'tokopedia' });
+        this.toast(`Selesai: ${result.total_success}/${result.total_requested} berhasil di-scrape`);
+        await this.loadLatestSnapshots();
+        await this.loadStats();
+      } catch (e) { this.toast(e.message, 'error'); }
+      this.scraping = false;
+    },
+  }
+}
+</script>
+</body>
+</html>

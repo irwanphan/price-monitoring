@@ -1,82 +1,67 @@
 from app.scrapers.zyte_scraper import ZyteScraper
-from app.scrapers.playwright_scraper import PlaywrightScraper
-from app.scrapers.base import BaseScraper, ScrapedPriceData
-from app.core.config import settings
+from app.scrapers.base import ScrapedPriceData
 from typing import Optional
-
-
-class ScraperFactory:
-    """Factory to create appropriate scraper based on marketplace/config"""
-    
-    @staticmethod
-    def get_scraper(
-        marketplace: str,
-        use_zyte: bool = False,
-        **kwargs
-    ) -> BaseScraper:
-        """
-        Get appropriate scraper for the marketplace.
-        
-        Args:
-            marketplace: Target marketplace name
-            use_zyte: Whether to use Zyte API (fallback to Playwright if False)
-            **kwargs: Scraper-specific configuration
-        
-        Returns:
-            Configured scraper instance
-        """
-        if use_zyte and settings.ZYTE_API_KEY:
-            return ZyteScraper(**kwargs)
-        
-        # Default to Playwright for most marketplaces
-        return PlaywrightScraper(**kwargs)
 
 
 class ScraperOrchestrator:
     """
-    Orchestrates scraping across multiple marketplaces and stores.
-    This will be called by Celery tasks.
+    Orchestrates scraping of Tokopedia product URLs using Zyte API.
+    
+    Workflow:
+    1. User provides list of product URLs to monitor
+    2. Orchestrator scrapes all URLs via Zyte
+    3. Returns structured price data for storage
+    
+    Note: Tokopedia store pages don't expose product lists via HTML.
+    Users need to manually collect product URLs from store pages
+    (visit tokopedia.com/store-name, copy product URLs).
     """
     
-    def __init__(self, use_zyte: bool = False):
+    def __init__(self, use_zyte: bool = True):
         self.use_zyte = use_zyte
     
-    async def scrape_all_stores(
+    async def scrape_product_urls(
         self,
-        product_queries: list[str],
-        stores: list[dict],  # [{marketplace, store_id, store_name}]
+        product_urls: list[str],
     ) -> list[ScrapedPriceData]:
         """
-        Scrape products across all configured stores.
+        Scrape multiple Tokopedia product URLs.
         
         Args:
-            product_queries: List of product search queries
-            stores: List of store configurations
+            product_urls: List of full Tokopedia product URLs
+        
+        Returns:
+            All scraped data
+        """
+        if self.use_zyte:
+            scraper = ZyteScraper()
+            try:
+                results = await scraper.scrape_product_urls(product_urls)
+                return results
+            finally:
+                await scraper.close()
+        
+        return []
+    
+    async def scrape_by_store(
+        self,
+        store_urls: dict[str, list[str]],
+    ) -> list[ScrapedPriceData]:
+        """
+        Scrape products grouped by store.
+        
+        Args:
+            store_urls: {store_name: [url1, url2, ...]}
         
         Returns:
             All scraped data combined
         """
         all_results = []
         
-        for store in stores:
-            marketplace = store["marketplace"]
-            store_id = store["store_id"]
-            
-            scraper = ScraperFactory.get_scraper(
-                marketplace,
-                use_zyte=self.use_zyte
-            )
-            
-            try:
-                results = await scraper.scrape_multiple_products(
-                    product_queries,
-                    store_id,
-                    marketplace=marketplace
-                )
-                all_results.extend(results)
-                print(f"[ScraperOrchestrator] Scraped {len(results)} items from {marketplace}/{store_id}")
-            except Exception as e:
-                print(f"[ScraperOrchestrator] Failed to scrape {marketplace}/{store_id}: {e}")
-                continue
+        for store_name, urls in store_urls.items():
+            print(f"[Orchestrator] Scraping {len(urls)} products from {store_name}...")
+            results = await self.scrape_product_urls(urls)
+            all_results.extend(results)
+            print(f"[Orchestrator] Got {len(results)} results from {store_name}")
         
         return all_results

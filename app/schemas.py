@@ -138,3 +138,77 @@ class MarketInsight(BaseModel):
     cheapest_store: str
     most_expensive_store: str
     anomaly_count: int
+
+
+# Scrape Schemas
+class ProductURL(BaseModel):
+    """Single product URL to scrape"""
+    url: str = Field(..., example="https://www.tokopedia.com/adata-xpg-id/product-name-xxx")
+    product_sku: Optional[str] = Field(None, description="SKU to match with tracked product")
+
+
+class BulkScrapeRequest(BaseModel):
+    """Request to scrape multiple product URLs"""
+    urls: list[ProductURL] = Field(..., min_length=1, max_length=100)
+    marketplace: str = Field(default="tokopedia", example="tokopedia")
+
+
+class ScrapedProductResponse(BaseModel):
+    """Single scraped product result"""
+    product_name: str
+    product_sku: Optional[str]
+    price: float
+    original_price: Optional[float]
+    discount_percentage: Optional[float]
+    stock_status: Optional[str]
+    product_url: str
+    store_id: str
+    store_name: str
+    marketplace: str
+
+
+class BulkScrapeResponse(BaseModel):
+    """Response from bulk scraping"""
+    total_requested: int
+    total_success: int
+    total_failed: int
+    results: list[ScrapedProductResponse]
+
+
+# Monitored URL Schemas
+class MonitoredURLCreate(BaseModel):
+    """Register a product URL to monitor (for weekly scraping)."""
+    product_id: int = Field(..., description="DB ID of the product to track")
+    store_id: int = Field(..., description="DB ID of the store")
+    url: str = Field(..., example="https://www.tokopedia.com/adata-xpg-id/product-name-xxx")
+    label: Optional[str] = Field(None, example="Adata XPG S70 Blade 1TB - Tokopedia")
+
+
+class MonitoredURLUpdate(BaseModel):
+    label: Optional[str] = None
+    is_active: Optional[bool] = None
+    url: Optional[str] = None
+
+
+class MonitoredURLResponse(BaseModel):
+    id: int
+    product_id: int
+    store_id: int
+    url: str
+    label: Optional[str]
+    is_active: bool
+    last_scraped_at: Optional[datetime]
+    created_at: datetime
+    # Nested info
+    product_name: Optional[str] = None
+    product_sku: Optional[str] = None
+    store_name: Optional[str] = None
+    marketplace: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BulkMonitoredURLCreate(BaseModel):
+    """Register multiple URLs at once."""
+    urls: list[MonitoredURLCreate] = Field(..., min_length=1, max_length=200)

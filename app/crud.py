@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.db.models import Product, Store, PriceSnapshot, CompetitorMapping
+from app.db.models import Product, Store, PriceSnapshot, CompetitorMapping, MonitoredURL
 
 
 class ProductCRUD:
@@ -75,6 +75,7 @@ class StoreCRUD:
     async def get_all(
         db: AsyncSession,
         marketplace: str | None = None,
+        store_marketplace_id: str | None = None,  # store_id field on marketplace (not DB pk)
         is_active: bool | None = True,
         skip: int = 0,
         limit: int = 100
@@ -82,6 +83,8 @@ class StoreCRUD:
         query = select(Store)
         if marketplace:
             query = query.where(Store.marketplace == marketplace)
+        if store_marketplace_id:
+            query = query.where(Store.store_id == store_marketplace_id)
         if is_active is not None:
             query = query.where(Store.is_active == is_active)
         query = query.offset(skip).limit(limit)
@@ -207,5 +210,90 @@ class CompetitorMappingCRUD:
         mapping = result.scalar_one_or_none()
         if mapping:
             await db.delete(mapping)
+            return True
+        return False
+
+
+class MonitoredURLCRUD:
+    """
+    CRUD for monitored URLs — the core config table.
+    Users register product URLs here so weekly scraping knows what to fetch.
+    """
+
+    @staticmethod
+    async def create(db: AsyncSession, monitored_url: MonitoredURL) -> MonitoredURL:
+        db.add(monitored_url)
+        await db.flush()
+        await db.refresh(monitored_url)
+        return monitored_url
+
+    @staticmethod
+    async def get_by_id(db: AsyncSession, url_id: int) -> MonitoredURL | None:
+        result = await db.execute(select(MonitoredURL).where(MonitoredURL.id == url_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_all(
+        db: AsyncSession,
+        product_id: int | None = None,
+        store_id: int | None = None,
+        is_active: bool | None = True,
+        skip: int = 0,
+        limit: int = 200
+    ) -> list[MonitoredURL]:
+        from sqlalchemy.orm import selectinload
+        query = select(MonitoredURL).options(
+            selectinload(MonitoredURL.product),
+            selectinload(MonitoredURL.store),
+        )
+        if product_id is not None:
+            query = query.where(MonitoredURL.product_id == product_id)
+        if store_id is not None:
+            query = query.where(MonitoredURL.store_id == store_id)
+        if is_active is not None:
+            query = query.where(MonitoredURL.is_active == is_active)
+        query = query.offset(skip).limit(limit)
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    @staticmethod
+    async def get_active_urls(db: AsyncSession) -> list[MonitoredURL]:
+        """Get all active monitored URLs for scheduled scraping."""
+        from sqlalchemy.orm import selectinload
+        result = await db.execute(
+            select(MonitoredURL)
+            .options(
+                selectinload(MonitoredURL.product),
+                selectinload(MonitoredURL.store),
+            )
+            .where(MonitoredURL.is_active == True)
+            .order_by(MonitoredURL.store_id)
+        )
+        return result.scalars().all()
+
+    @staticmethod
+    async def update(db: AsyncSession, monitored_url: MonitoredURL, update_data: dict) -> MonitoredURL:
+        for key, value in update_data.items():
+            setattr(monitored_url, key, value)
+        await db.flush()
+        await db.refresh(monitored_url)
+        return monitored_url
+
+    @staticmethod
+    async def mark_scraped(db: AsyncSession, url_id: int) -> None:
+        """Update last_scraped_at timestamp."""
+        from datetime import datetime
+        result = await db.execute(select(MonitoredURL).where(MonitoredURL.id == url_id))
+        murl = result.scalar_one_or_none()
+        if murl:
+            murl.last_scraped_at = datetime.utcnow()
+            await db.flush()
+
+    @staticmethod
+    async def delete(db: AsyncSession, url_id: int) -> bool:
+        result = await db.execute(select(MonitoredURL).where(MonitoredURL.id == url_id))
+        murl = result.scalar_one_or_none()
+        if murl:
+            await db.delete(murl)
             return True
         return False

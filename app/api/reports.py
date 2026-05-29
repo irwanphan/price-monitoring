@@ -79,18 +79,16 @@ async def get_price_comparison_summary(
         prices = [s.price for s in snapshots]
         
         summary.append({
+            "product_id": product.id,
             "brand": product.brand,
             "product_name": product.name,
             "sku": product.sku,
             "category": product.category,
-            "total_listings": len(snapshots),
-            "lowest_price": min(prices),
-            "highest_price": max(prices),
-            "average_price": sum(prices) / len(prices)
+            "count": len(snapshots),
+            "min_price": min(prices),
+            "max_price": max(prices),
+            "avg_price": sum(prices) / len(prices),
         })
-    
-    return {
-        "report_date": datetime.utcnow().isoformat(),
-        "days": days,
-        "products": summary
-    }
+
+    # Return list directly so dashboard can iterate
+    return summary

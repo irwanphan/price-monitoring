@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # FastAPI Application
   api:
@@ -11,8 +9,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - ZYTE_API_KEY=${ZYTE_API_KEY:-}
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - .:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -25,9 +25,14 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=price_monitor
     ports:
-      - "5432:5432"
+      - "5433:5432"  # 5433 di host karena 5432 dipakai PostgreSQL local
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Redis (for Celery)
   redis:
